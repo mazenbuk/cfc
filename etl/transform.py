@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from datetime import datetime
+
 import pandas as pd
 
 RAW_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
@@ -90,26 +91,60 @@ def transform_dim_venue(team_info_raw, fixtures_raw):
     return df
 
 
-def transform_dim_player(squad_raw):
-    if not squad_raw:
-        return pd.DataFrame()
-
+def transform_dim_player(squad_raw, fixture_stats_raw=None):
     rows = []
-    for team_block in squad_raw:
-        team_id = team_block["team"]["id"]
-        for p in team_block.get("players", []):
-            rows.append({
-                "player_id": p["id"],
-                "team_id": team_id,
-                "full_name": p.get("name"),
-                "position": p.get("position"),
-                "nationality": None,
-                "birth_date": None,
-                "height_cm": None,
-                "weight_kg": None,
-            })
+
+    if squad_raw:
+        for team_block in squad_raw:
+            team_id = team_block["team"]["id"]
+            for p in team_block.get("players", []):
+                rows.append({
+                    "player_id": p["id"],
+                    "team_id": team_id,
+                    "full_name": p.get("name"),
+                    "position": p.get("position"),
+                    "nationality": None,
+                    "birth_date": None,
+                    "height_cm": None,
+                    "weight_kg": None,
+                })
 
     df = pd.DataFrame(rows).drop_duplicates(subset="player_id")
+    known_ids = set(df["player_id"]) if not df.empty else set()
+
+    extra_rows = []
+    if fixture_stats_raw:
+        seen_extra = set()
+        for entry in fixture_stats_raw:
+            for team_block in entry["stats"]:
+                if team_block["team"]["id"] != CHELSEA_TEAM_ID:
+                    continue
+                
+                for p in team_block.get("players", []):
+                    pid = p["player"]["id"]
+                    if pid in known_ids or pid in seen_extra:
+                        continue
+                    
+                    seen_extra.add(pid)
+                    stats_list = p.get("statistics", [])
+                    position = None
+                    if stats_list:
+                        position = (stats_list[0].get("games") or {}).get("position")
+                    extra_rows.append({
+                        "player_id": pid,
+                        "team_id": CHELSEA_TEAM_ID,
+                        "full_name": p["player"].get("name"),
+                        "position": position,
+                        "nationality": None,
+                        "birth_date": None,
+                        "height_cm": None,
+                        "weight_kg": None,
+                    })
+
+    if extra_rows:
+        df = pd.concat([df, pd.DataFrame(extra_rows)], ignore_index=True)
+        df = df.drop_duplicates(subset="player_id")
+
     _save_csv(df, "dim_player.csv")
     return df
 
@@ -222,6 +257,9 @@ def transform_fact_player_stats(fixture_stats_raw):
                 position = (games.get("position") or "").upper()
                 minutes = games.get("minutes")
 
+                if team_id != CHELSEA_TEAM_ID:
+                    continue
+
                 if position == "G":
                     gk_rows.append({
                         "match_id": match_id,
@@ -268,7 +306,7 @@ def main():
     print("\n[Dimensions]")
     transform_dim_team(team_info_raw, fixtures_raw)
     transform_dim_venue(team_info_raw, fixtures_raw)
-    transform_dim_player(squad_raw)
+    transform_dim_player(squad_raw, fixture_stats_raw)
     transform_dim_date(fixtures_raw)
 
     print("\n[Facts]")

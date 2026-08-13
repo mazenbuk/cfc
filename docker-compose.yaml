@@ -27,7 +27,7 @@ services:
     depends_on:
       - postgres
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@chelsea.local}
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-chelsea@gmail.com}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-chelsea_admin}
     ports:
       - "5050:80"
