@@ -19,31 +19,44 @@ MAX_FIXTURES_FOR_STATS = 10
 RAW_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 
-REQUEST_DELAY_SECONDS = 1.5
+REQUEST_DELAY_SECONDS = 3
 
 
 # ---------- HELPER ----------
 
-def _get(endpoint: str, params: dict) -> dict:
+def _get(endpoint: str, params: dict, max_retries: int = 3) -> dict:
+
     if not API_KEY:
         raise EnvironmentError(
-            "API_FOOTBALL_KEY tidak ditemukan"
+            "API_FOOTBALL_KEY tidak ditemukan."
         )
 
     url = f"{BASE_URL}/{endpoint}"
-    resp = requests.get(url, headers=HEADERS, params=params, timeout=15)
-    resp.raise_for_status()
-    data = resp.json()
 
-    if data.get("errors"):
-        print(f"API error: {data['errors']}")
+    for attempt in range(1, max_retries + 1):
+        resp = requests.get(url, headers=HEADERS, params=params, timeout=15)
 
-    remaining = resp.headers.get("x-ratelimit-requests-remaining")
-    if remaining is not None:
-        print(f"sisa kuota: {remaining}")
+        if resp.status_code == 429:
+            wait = int(resp.headers.get("Retry-After", 20 * attempt))
+            time.sleep(wait)
+            continue
 
-    time.sleep(REQUEST_DELAY_SECONDS)
-    return data.get("response", [])
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("errors"):
+            print(f"API error: {data['errors']}")
+
+        remaining = resp.headers.get("x-ratelimit-requests-remaining")
+        if remaining is not None:
+            print(f"sisa kuota: {remaining})")
+
+        time.sleep(REQUEST_DELAY_SECONDS)
+        return data.get("response", [])
+
+    raise RuntimeError(
+        f"Gagal fetch {endpoint} setelah {max_retries}x percobaan."
+    )
 
 
 def _save_json(filename: str, data) -> None:
@@ -56,7 +69,7 @@ def _save_json(filename: str, data) -> None:
 # ---------- EXTRACT FUNCTIONS ----------
 
 def extract_team_info():
-    """Info Chelsea"""
+    """Info tim Chelsea"""
     print("[1/4] Fetching team info")
     data = _get("teams", {"id": CHELSEA_TEAM_ID})
     _save_json("team_info.json", data)
@@ -106,8 +119,6 @@ def extract_fixture_stats(fixtures: list):
 # ---------- MAIN ----------
 
 def main():
-    print(f"Extract data Chelsea FC (team_id={CHELSEA_TEAM_ID}, season={SEASON})\n")
-
     extract_team_info()
     extract_squad()
     fixtures = extract_fixtures()
@@ -115,9 +126,9 @@ def main():
     if fixtures:
         extract_fixture_stats(fixtures)
     else:
-        print("Tidak ada fixture ditemukan")
+        print("Tidak ada fixture")
 
-    print("\nSelesai.")
+    print("\nSelesai")
 
 
 if __name__ == "__main__":
